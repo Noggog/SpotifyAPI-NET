@@ -85,6 +85,11 @@ namespace SpotifyAPI.Web
         public bool TooManyRequestsConsumesARetry { get; set; } = false;
 
         /// <summary>
+        ///     Whether to catch rejected SSL connections and treat them as a retryable error.
+        /// </summary>
+        public bool RetryRejectedConnections { get; set; } = true;
+
+        /// <summary>
         ///     Error codes that will trigger auto-retry if <see cref="UseAutoRetry"/> is enabled.
         /// </summary>
         public IEnumerable<int> RetryErrorCodes { get; set; } = new[] { 500, 502, 503 };
@@ -2457,11 +2462,13 @@ namespace SpotifyAPI.Web
         public async Task<T> DownloadDataAsync<T>(string url) where T : BasicModel
         {
             int triesLeft = RetryTimes + 1;
-            Error lastError;
+            Error lastError = null;
+            bool forceRetry;
 
             Tuple<ResponseInfo, T> response = null;
             do
             {
+                forceRetry = false;
                 if (response != null)
                 {
                     int msToWait = RetryAfter;
@@ -2471,7 +2478,20 @@ namespace SpotifyAPI.Web
                     }
                     await Task.Delay(RetryAfter).ConfigureAwait(false);
                 }
-                response = await DownloadDataAltAsync<T>(url).ConfigureAwait(false);
+                try
+                {
+                    response = await DownloadDataAltAsync<T>(url).ConfigureAwait(false);
+                }
+                catch (System.Net.Http.HttpRequestException)
+                {
+                    if (RetryRejectedConnections)
+                    {
+                        triesLeft--;
+                        forceRetry = true;
+                        continue;
+                    }
+                    throw;
+                }
 
                 response.Item2.AddResponseInfo(response.Item1);
                 lastError = response.Item2.Error;
@@ -2483,7 +2503,8 @@ namespace SpotifyAPI.Web
 
             } while (UseAutoRetry
                 && triesLeft > 0
-                && (TryGetTooManyRequests(response.Item1, out var _)
+                && (forceRetry
+                    || TryGetTooManyRequests(response.Item1, out var _)
                     || (lastError != null && RetryErrorCodes.Contains(lastError.Status))));
 
 

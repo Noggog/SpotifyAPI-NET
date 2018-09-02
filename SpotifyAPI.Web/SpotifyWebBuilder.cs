@@ -999,5 +999,32 @@ namespace SpotifyAPI.Web
             return $"{APIBase}/me/player/shuffle?state={shuffle}&device_id={deviceId}";
         }
         #endregion
+
+        #region Offset Substitution
+        /// <summary>
+        ///     Returns the same input string, with the offset value swapped to a new value.
+        /// </summary>
+        /// <param name="str">The original request string</param>
+        /// <param name="offsetSubstitution">The new offset value to substitute in place of the existing offset</param>
+        /// <param name="processedString">The processed string with the new offset value</param>
+        /// <returns>Whether an offset parameter was found and the substitution was made to the string.</returns>
+        /// <remarks>AUTH NEEDED</remarks>
+        public static bool TrySubstituteOffset(string str, int offsetSubstitution, out string processedString)
+        {
+            var offsetIndex = str.IndexOf($"offset=");
+            if (offsetIndex == -1)
+            {
+                processedString = str;
+                return false;
+            }
+            var endingIndex = str.IndexOf('&', offsetIndex);
+            if (endingIndex == -1)
+            {
+                processedString = str.Substring(0, offsetIndex + $"offset=".Length) + offsetSubstitution;
+            }
+            processedString = str.Substring(0, offsetIndex + $"offset=".Length) + offsetSubstitution + str.Substring(endingIndex);
+            return true;
+        }
+        #endregion
     }
 }

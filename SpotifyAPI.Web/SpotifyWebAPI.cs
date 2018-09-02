@@ -2299,6 +2299,66 @@ namespace SpotifyAPI.Web
             return GetPreviousPageAsync<Paging<T>, T>(paging);
         }
 
+        public IEnumerable<T> FlattenPage<T>(Paging<T> firstPage, bool throwIfMissingItems = true)
+        {
+            var expected = firstPage.Total;
+            int numRequests = expected / firstPage.Limit;
+
+            var results = Enumerable.Range(1, numRequests)
+                .Select((i) =>
+                {
+                    if (!SpotifyWebBuilder.TrySubstituteOffset(firstPage.Next, i * firstPage.Limit, out var stringReq))
+                    {
+                        throw new ArgumentException("Page next request string did not have an offset value parameter.");
+                    }
+                    var page = this.DownloadData<Paging<T>>(stringReq);
+                    return (IEnumerable<T>)page.Items;
+                });
+
+            var ret = firstPage.Items.Concat(results.SelectMany(l => l)).ToArray();
+            if (throwIfMissingItems)
+            {
+                if (ret.Length != expected)
+                {
+                    throw new Exception($"Did not receive the expected amount of results: {ret.Length} != {expected}");
+                }
+            }
+            return ret;
+        }
+
+        public async Task<IEnumerable<T>> FlattenPageAsync<T>(Paging<T> firstPage, bool throwIfMissingItems = true)
+        {
+            if (firstPage.Total == 0) return Enumerable.Empty<T>();
+            var expected = firstPage.Total;
+            int numRequests = expected / firstPage.Limit;
+
+            var results = await Task.WhenAll(
+                Enumerable.Range(1, numRequests)
+                .Select((i) =>
+                {
+                    if (!SpotifyWebBuilder.TrySubstituteOffset(firstPage.Next, i * firstPage.Limit, out var stringReq))
+                    {
+                        throw new ArgumentException("Page next request string did not have an offset value parameter.");
+                    }
+                    return Task.Run(async () =>
+                    {
+                        var page = await this.DownloadDataAsync<Paging<T>>(stringReq);
+                        return (IEnumerable<T>)page.Items;
+                    });
+                }));
+
+            var ret = firstPage.Items.Concat(results.SelectMany(l => l));
+            if (throwIfMissingItems)
+            {
+                int count = ret.Count();
+                if (count != expected)
+                {
+                    throw new Exception($"Did not receive the expected amount of results: {count} != {expected}");
+                }
+            }
+            return ret;
+        }
+
         private ListResponse<T> DownloadList<T>(string url)
         {
             int triesLeft = RetryTimes + 1;

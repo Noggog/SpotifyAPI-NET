@@ -2331,6 +2331,10 @@ namespace SpotifyAPI.Web
             if (firstPage.Total == 0) return Enumerable.Empty<T>();
             var expected = firstPage.Total;
             int numRequests = expected / firstPage.Limit;
+            if (firstPage.Items == null)
+            {
+                numRequests++;
+            }
 
             var results = await Task.WhenAll(
                 Enumerable.Range(1, numRequests)
@@ -2347,7 +2351,45 @@ namespace SpotifyAPI.Web
                     });
                 }));
 
-            var ret = firstPage.Items.Concat(results.SelectMany(l => l));
+            var ret = (firstPage.Items ?? Enumerable.Empty<T>()).Concat(results.SelectMany(l => l));
+            if (throwIfMissingItems)
+            {
+                int count = ret.Count();
+                if (count != expected)
+                {
+                    throw new Exception($"Did not receive the expected amount of results: {count} != {expected}");
+                }
+            }
+            return ret;
+        }
+
+        public async Task<IEnumerable<T>> FlattenPageAsync<M, T>(Paging<T> firstPage, Func<M, Paging<T>> getter, bool throwIfMissingItems = true)
+            where M : BasicModel
+        {
+            if (firstPage.Total == 0) return Enumerable.Empty<T>();
+            var expected = firstPage.Total;
+            int numRequests = expected / firstPage.Limit;
+            if (firstPage.Items == null)
+            {
+                numRequests++;
+            }
+
+            var results = await Task.WhenAll(
+                Enumerable.Range(1, numRequests)
+                .Select((i) =>
+                {
+                    if (!SpotifyWebBuilder.TrySubstituteOffset(firstPage.Next, i * firstPage.Limit, out var stringReq))
+                    {
+                        throw new ArgumentException("Page next request string did not have an offset value parameter.");
+                    }
+                    return Task.Run(async () =>
+                    {
+                        var item = await this.DownloadDataAsync<M>(stringReq);
+                        return (IEnumerable<T>)getter(item).Items;
+                    });
+                }));
+
+            var ret = (firstPage.Items ?? Enumerable.Empty<T>()).Concat(results.SelectMany(l => l));
             if (throwIfMissingItems)
             {
                 int count = ret.Count();
